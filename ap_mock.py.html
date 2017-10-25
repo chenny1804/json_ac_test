@@ -1,0 +1,439 @@
+<html><head>
+<title>ap_mock.py</title>
+<meta name="Generator" content="htmlizer/[twisted, version 13.2.0]" />
+<link rel="alternate" href="ap_mock.py" type="text/x-python" />
+
+</head>
+<body>
+<pre><span class="py-src-comment">#!/usr/bin/env python</span>
+<span class="py-src-comment"># -*- coding: utf-8 -*-  </span>
+
+<span class="py-src-keyword">import</span> <span class="py-src-variable">socket</span>,<span class="py-src-variable">traceback</span>,<span class="py-src-variable">sys</span>,<span class="py-src-variable">json</span>,<span class="py-src-variable">time</span>,<span class="py-src-variable">os</span>,<span class="py-src-variable">signal</span>
+<span class="py-src-keyword">import</span> <span class="py-src-variable">logging</span>,<span class="py-src-variable">select</span>
+<span class="py-src-keyword">import</span> <span class="py-src-variable">threading</span>,<span class="py-src-variable">struct</span>,<span class="py-src-variable">copy</span>
+<span class="py-src-keyword">import</span> <span class="py-src-variable">ConfigParser</span>,<span class="py-src-variable">random</span>
+<span class="py-src-keyword">import</span> <span class="py-src-variable">logging</span>
+<span class="py-src-keyword">import</span> <span class="py-src-variable">multiprocessing</span>
+<span class="py-src-keyword">import</span> <span class="py-src-variable">BaseHTTPServer</span>
+
+
+<span class="py-src-variable">AP_LOGIN_REQUEST</span> = <span class="py-src-number">0xf001</span>
+<span class="py-src-variable">AP_LOGIN_REPLY</span> = <span class="py-src-number">0xf002</span>
+<span class="py-src-variable">AP_HEART_REQUEST</span> = <span class="py-src-number">0xf003</span>
+<span class="py-src-variable">AP_HEART_REPLY</span> = <span class="py-src-number">0xf004</span>
+<span class="py-src-variable">AP_USE_INFO</span> = <span class="py-src-number">0xf005</span>
+
+<span class="py-src-variable">is_exit</span> = <span class="py-src-variable">False</span>
+
+<span class="py-src-variable">Theads</span> = []
+<span class="py-src-variable">web_list</span> = []
+
+<span class="py-src-keyword">def</span> <span class="py-src-identifier">signal_init</span>(<span class="py-src-parameter">signum</span>, <span class="py-src-parameter">frame</span>):
+    <span class="py-src-keyword">global</span> <span class="py-src-variable">is_exit</span>
+    <span class="py-src-keyword">print</span> <span class="py-src-string">'程序准备终结者中。\n'</span>
+    <span class="py-src-variable">is_exit</span> = <span class="py-src-variable">True</span>
+    <span class="py-src-keyword">print</span> <span class="py-src-string">"指令设置完毕，虚拟AP正在逐步停止中，请耐心等待\n"</span>
+    
+<span class="py-src-keyword">class</span> <span class="py-src-identifier">ConfigSystem</span>():
+    <span class="py-src-variable">_cf</span> = <span class="py-src-string">''</span>
+    <span class="py-src-variable">_basic_data</span> = {}
+    <span class="py-src-variable">_use_data</span> = {}
+    <span class="py-src-variable">_ap_traffic</span>={}
+    <span class="py-src-variable">_ap_sta_info</span>={}
+    <span class="py-src-variable">_ap_sta_info_5g</span>={}
+    <span class="py-src-variable">_ap_list</span> = []
+    
+    <span class="py-src-variable">_login_heart_list</span>={}
+    <span class="py-src-variable">_user_info_list</span>={}
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">__init__</span>(<span class="py-src-parameter">self</span>,<span class="py-src-parameter">config</span>):
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span> = <span class="py-src-variable">ConfigParser</span>.<span class="py-src-variable">ConfigParser</span>()
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">read</span>(<span class="py-src-variable">config</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>={}
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_g24_valid'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_g24_valid"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_g24_standard'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_g24_standard"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_g24_channel'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_g24_channel"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_g24_bandwidth'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_g24_bandwidth"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_g24_bind'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_g24_bind"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_g24_power'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_g24_power"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_g5_valid'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_g5_valid"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_g5_standard'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_g5_standard"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_g5_channel'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_g5_channel"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_g5_bandwidth'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_g5_bandwidth"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_g5_bind'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_g5_bind"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_g5_power'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_g5_power"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_runtime'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_runtime"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_version'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_version"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_flash_status'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_flash_status"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>[<span class="py-src-string">'ap_mimo'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"BasicData"</span>,<span class="py-src-string">"ap_mimo"</span>)
+        
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_use_data</span>[<span class="py-src-string">'ap_mac'</span>]  = <span class="py-src-string">''</span>
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_use_data</span>[<span class="py-src-string">'ap_g24_valid'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"UserData"</span>,<span class="py-src-string">"ap_g24_valid"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_use_data</span>[<span class="py-src-string">'ap_g5_valid'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"UserData"</span>,<span class="py-src-string">"ap_g5_valid"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_use_data</span>[<span class="py-src-string">'ap_g24_noise'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"UserData"</span>,<span class="py-src-string">"ap_g24_noise"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_use_data</span>[<span class="py-src-string">'ap_g5_noise'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"UserData"</span>,<span class="py-src-string">"ap_g5_noise"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_use_data</span>[<span class="py-src-string">'ap_g24_sta_num'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"UserData"</span>,<span class="py-src-string">"ap_g24_sta_num"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_use_data</span>[<span class="py-src-string">'ap_g5_sta_num'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"UserData"</span>,<span class="py-src-string">"ap_g5_sta_num"</span>)
+    
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_traffic</span>[<span class="py-src-string">'rx_packets'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"APTraffic"</span>,<span class="py-src-string">"rx_packets"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_traffic</span>[<span class="py-src-string">'rx_bytes'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"APTraffic"</span>,<span class="py-src-string">"rx_bytes"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_traffic</span>[<span class="py-src-string">'rx_retrys'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"APTraffic"</span>,<span class="py-src-string">"rx_retrys"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_traffic</span>[<span class="py-src-string">'tx_packets'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"APTraffic"</span>,<span class="py-src-string">"tx_packets"</span>)  
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_traffic</span>[<span class="py-src-string">'tx_bytes'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"APTraffic"</span>,<span class="py-src-string">"tx_bytes"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_traffic</span>[<span class="py-src-string">'tx_retrys'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"APTraffic"</span>,<span class="py-src-string">"tx_retrys"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_traffic</span>[<span class="py-src-string">'tx_fail'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"APTraffic"</span>,<span class="py-src-string">"tx_fail"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_traffic</span>[<span class="py-src-string">'tx_drop'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"APTraffic"</span>,<span class="py-src-string">"tx_drop"</span>)
+      
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'sta_rssi'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"APStaInfo"</span>,<span class="py-src-string">"sta_rssi"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'sta_rx_rate'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"APStaInfo"</span>,<span class="py-src-string">"sta_rx_rate"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'sta_rx_retry'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"APStaInfo"</span>,<span class="py-src-string">"sta_rx_retry"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'sta_tx_rate'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"APStaInfo"</span>,<span class="py-src-string">"sta_tx_rate"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'sta_tx_retry'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"APStaInfo"</span>,<span class="py-src-string">"sta_tx_retry"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'vlan_idx'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"APStaInfo"</span>,<span class="py-src-string">"vlan_idx"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'network'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"APStaInfo"</span>,<span class="py-src-string">"network"</span>)
+
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'sta_rssi'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"APStaInfo5G"</span>,<span class="py-src-string">"sta_rssi"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'sta_rx_rate'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"APStaInfo5G"</span>,<span class="py-src-string">"sta_rx_rate"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'sta_rx_retry'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"APStaInfo5G"</span>,<span class="py-src-string">"sta_rx_retry"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'sta_tx_rate'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"APStaInfo5G"</span>,<span class="py-src-string">"sta_tx_rate"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'sta_tx_retry'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"APStaInfo5G"</span>,<span class="py-src-string">"sta_tx_retry"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'vlan_idx'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"APStaInfo5G"</span>,<span class="py-src-string">"vlan_idx"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'network'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"APStaInfo5G"</span>,<span class="py-src-string">"network"</span>)
+        
+        
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ac_ip</span> =  <span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"global"</span>, <span class="py-src-string">"ac_ip"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_eth</span> = <span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"global"</span>, <span class="py-src-string">"eth"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ac_mask</span> =<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"global"</span>, <span class="py-src-string">"mask"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_heart_time</span> = <span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"global"</span>, <span class="py-src-string">"heart_time"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_num</span> = <span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"global"</span>, <span class="py-src-string">"ap_num"</span>)
+        
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_wait_time</span>=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">getint</span>(<span class="py-src-string">"global"</span>, <span class="py-src-string">"wait_time"</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_cgi_response</span>=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">get</span>(<span class="py-src-string">"global"</span>, <span class="py-src-string">"cgi_response"</span>)
+        
+        
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_sta_item</span>=<span class="py-src-variable">self</span>.<span class="py-src-variable">_cf</span>.<span class="py-src-variable">items</span>(<span class="py-src-string">"StaMac"</span>)
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">getHeartTime</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_heart_time</span>
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">getIpList</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_list</span>
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">getBroadcast</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_broadcast</span>
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">getWaitTime</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_wait_time</span>
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">getCgiResponse</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_cgi_response</span>    
+        
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">ConfigIp</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-variable">mask</span> =<span class="py-src-number">0</span>
+        <span class="py-src-variable">ip</span> = <span class="py-src-variable">socket</span>.<span class="py-src-variable">ntohl</span>(<span class="py-src-variable">struct</span>.<span class="py-src-variable">unpack</span>(<span class="py-src-string">"I"</span>,<span class="py-src-variable">socket</span>.<span class="py-src-variable">inet_aton</span>(<span class="py-src-variable">str</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_ac_ip</span>)))[<span class="py-src-number">0</span>])
+
+        <span class="py-src-keyword">for</span> <span class="py-src-variable">v</span> <span class="py-src-keyword">in</span> <span class="py-src-variable">range</span>(<span class="py-src-number">1</span>,<span class="py-src-number">32</span>-<span class="py-src-variable">self</span>.<span class="py-src-variable">_ac_mask</span>+<span class="py-src-number">1</span>):
+            <span class="py-src-variable">mask</span> = <span class="py-src-variable">mask</span> &lt;&lt; <span class="py-src-number">1</span> | <span class="py-src-number">1</span>
+
+        <span class="py-src-variable">broadcast</span>= <span class="py-src-variable">ip</span> | <span class="py-src-variable">mask</span>
+        <span class="py-src-variable">net</span> = <span class="py-src-variable">broadcast</span> ^<span class="py-src-variable">mask</span>
+        <span class="py-src-variable">mask</span>=<span class="py-src-number">4294967295</span>
+        
+        <span class="py-src-keyword">for</span> <span class="py-src-variable">v</span> <span class="py-src-keyword">in</span> <span class="py-src-variable">range</span>(<span class="py-src-number">1</span>,<span class="py-src-number">32</span>-<span class="py-src-variable">self</span>.<span class="py-src-variable">_ac_mask</span>+<span class="py-src-number">1</span>):
+            <span class="py-src-variable">mask</span> = <span class="py-src-variable">mask</span> &lt;&lt; <span class="py-src-number">1</span>        
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_broadcast</span> = <span class="py-src-variable">socket</span>.<span class="py-src-variable">inet_ntoa</span>(<span class="py-src-variable">struct</span>.<span class="py-src-variable">pack</span>(<span class="py-src-string">'I'</span>,<span class="py-src-variable">socket</span>.<span class="py-src-variable">htonl</span>(<span class="py-src-variable">broadcast</span>)))
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_mask</span> = <span class="py-src-variable">socket</span>.<span class="py-src-variable">inet_ntoa</span>(<span class="py-src-variable">struct</span>.<span class="py-src-variable">pack</span>(<span class="py-src-string">'I'</span>,<span class="py-src-variable">socket</span>.<span class="py-src-variable">htonl</span>(<span class="py-src-variable">mask</span>)))
+    
+        <span class="py-src-variable">ip_addr</span>=<span class="py-src-variable">net</span> + <span class="py-src-number">100</span>
+        <span class="py-src-keyword">for</span> <span class="py-src-variable">i</span> <span class="py-src-keyword">in</span> <span class="py-src-variable">range</span>(<span class="py-src-number">0</span>,<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_num</span>):
+            <span class="py-src-variable">ip_addr</span>= <span class="py-src-variable">ip_addr</span> + <span class="py-src-number">1</span>
+            <span class="py-src-variable">ip</span> = <span class="py-src-variable">socket</span>.<span class="py-src-variable">inet_ntoa</span>(<span class="py-src-variable">struct</span>.<span class="py-src-variable">pack</span>(<span class="py-src-string">'I'</span>,<span class="py-src-variable">socket</span>.<span class="py-src-variable">htonl</span>(<span class="py-src-variable">ip_addr</span>)))
+            <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_list</span>.<span class="py-src-variable">append</span>(<span class="py-src-variable">ip</span>)
+            <span class="py-src-variable">cmd</span>=<span class="py-src-string">"ip addr add "</span> + <span class="py-src-variable">ip</span> + <span class="py-src-string">"/"</span> +<span class="py-src-variable">str</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_ac_mask</span>) + <span class="py-src-string">" dev "</span> + <span class="py-src-variable">self</span>.<span class="py-src-variable">_eth</span>
+            <span class="py-src-variable">os</span>.<span class="py-src-variable">system</span>(<span class="py-src-variable">cmd</span>)
+                    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">DeleteIp</span>(<span class="py-src-parameter">self</span>,<span class="py-src-parameter">ip</span>):
+        <span class="py-src-variable">cmd</span>=<span class="py-src-string">"ip addr del "</span> + <span class="py-src-variable">ip</span> + <span class="py-src-string">"/"</span> +<span class="py-src-variable">str</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_ac_mask</span>) + <span class="py-src-string">" dev "</span> + <span class="py-src-variable">self</span>.<span class="py-src-variable">_eth</span>
+        <span class="py-src-variable">os</span>.<span class="py-src-variable">system</span>(<span class="py-src-variable">cmd</span>)
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">_switchhex</span>(<span class="py-src-parameter">self</span>,<span class="py-src-parameter">af_mac</span>):
+        <span class="py-src-variable">after_mac</span>=<span class="py-src-variable">str</span>(<span class="py-src-variable">hex</span>(<span class="py-src-variable">af_mac</span>))[<span class="py-src-number">2</span>:]
+        <span class="py-src-keyword">for</span> <span class="py-src-variable">v</span> <span class="py-src-keyword">in</span> <span class="py-src-variable">range</span>(<span class="py-src-number">1</span>,<span class="py-src-number">8</span>-<span class="py-src-variable">len</span>(<span class="py-src-variable">after_mac</span>)-<span class="py-src-number">1</span>):
+            <span class="py-src-variable">after_mac</span>=<span class="py-src-string">'0'</span>+ <span class="py-src-variable">after_mac</span>
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">after_mac</span>
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">GetloginHeartList</span>(<span class="py-src-parameter">self</span>):
+        
+        <span class="py-src-variable">pre_mac</span>=<span class="py-src-string">'001234'</span>
+        <span class="py-src-variable">start_mac</span>=<span class="py-src-number">0x1</span>
+        <span class="py-src-keyword">for</span> <span class="py-src-variable">ip</span> <span class="py-src-keyword">in</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_list</span>: 
+            <span class="py-src-variable">copydata</span> = <span class="py-src-variable">copy</span>.<span class="py-src-variable">deepcopy</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_basic_data</span>)
+            <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_mac'</span>]=<span class="py-src-variable">pre_mac</span>+<span class="py-src-variable">self</span>.<span class="py-src-variable">_switchhex</span>(<span class="py-src-variable">start_mac</span>)
+            <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_ip'</span>]=<span class="py-src-variable">ip</span>
+            <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_mask'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_mask</span>
+            <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_gateway'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_ac_ip</span>
+            <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_broadcast'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_broadcast</span>
+            <span class="py-src-variable">self</span>.<span class="py-src-variable">_login_heart_list</span>[<span class="py-src-variable">ip</span>]=<span class="py-src-variable">copydata</span>
+            <span class="py-src-variable">start_mac</span>=<span class="py-src-variable">start_mac</span>+<span class="py-src-number">1</span>
+            
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_login_heart_list</span>         
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">GetUserInfoList</span>(<span class="py-src-parameter">self</span>):
+        
+        <span class="py-src-variable">copydata</span> = <span class="py-src-variable">copy</span>.<span class="py-src-variable">deepcopy</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_use_data</span>)
+        
+        <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g24_traffic'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_traffic</span>
+        <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g5_traffic'</span>]=<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_traffic</span>
+        
+        <span class="py-src-keyword">if</span> <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g24_sta_num'</span>] != <span class="py-src-string">'random'</span>:
+            <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g24_sta_num'</span>] = <span class="py-src-variable">int</span>(<span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g24_sta_num'</span>])
+        <span class="py-src-keyword">else</span>:
+            <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g24_sta_num'</span>]  = <span class="py-src-variable">random</span>.<span class="py-src-variable">randint</span>(<span class="py-src-number">0</span>, <span class="py-src-number">30</span>)
+
+        <span class="py-src-keyword">if</span> <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g5_sta_num'</span>] != <span class="py-src-string">'random'</span>:
+            <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g5_sta_num'</span>] = <span class="py-src-variable">int</span>(<span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g5_sta_num'</span>])
+        <span class="py-src-keyword">else</span>:
+            <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g5_sta_num'</span>]  = <span class="py-src-variable">random</span>.<span class="py-src-variable">randint</span>(<span class="py-src-number">0</span>, <span class="py-src-number">80</span>)
+            
+        
+        <span class="py-src-variable">rssi_start</span>=<span class="py-src-variable">int</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'sta_rssi'</span>].<span class="py-src-variable">split</span>(<span class="py-src-string">'-'</span>)[<span class="py-src-number">0</span>])
+        <span class="py-src-variable">rssi_end</span>=<span class="py-src-variable">int</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'sta_rssi'</span>].<span class="py-src-variable">split</span>(<span class="py-src-string">'-'</span>)[<span class="py-src-number">1</span>])
+        
+        <span class="py-src-variable">rx_rate_list</span>=<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'sta_rx_rate'</span>].<span class="py-src-variable">split</span>(<span class="py-src-string">','</span>)
+        <span class="py-src-variable">rx_retry_list</span>=<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'sta_rx_retry'</span>].<span class="py-src-variable">split</span>(<span class="py-src-string">','</span>)
+        
+        <span class="py-src-variable">tx_rate_list</span>=<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'sta_tx_rate'</span>].<span class="py-src-variable">split</span>(<span class="py-src-string">','</span>)
+        <span class="py-src-variable">tx_retry_list</span>=<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>[<span class="py-src-string">'sta_tx_retry'</span>].<span class="py-src-variable">split</span>(<span class="py-src-string">','</span>)
+
+        <span class="py-src-variable">rssi_start_5g</span>=<span class="py-src-variable">int</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'sta_rssi'</span>].<span class="py-src-variable">split</span>(<span class="py-src-string">'-'</span>)[<span class="py-src-number">0</span>])
+        <span class="py-src-variable">rssi_end_5g</span>=<span class="py-src-variable">int</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'sta_rssi'</span>].<span class="py-src-variable">split</span>(<span class="py-src-string">'-'</span>)[<span class="py-src-number">1</span>])
+        
+        <span class="py-src-variable">rx_rate_list_5g</span>=<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'sta_rx_rate'</span>].<span class="py-src-variable">split</span>(<span class="py-src-string">','</span>)
+        <span class="py-src-variable">rx_retry_list_5g</span>=<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'sta_rx_retry'</span>].<span class="py-src-variable">split</span>(<span class="py-src-string">','</span>)
+        
+        <span class="py-src-variable">tx_rate_list_5g</span>=<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'sta_tx_rate'</span>].<span class="py-src-variable">split</span>(<span class="py-src-string">','</span>)
+        <span class="py-src-variable">tx_retry_list_5g</span>=<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>[<span class="py-src-string">'sta_tx_retry'</span>].<span class="py-src-variable">split</span>(<span class="py-src-string">','</span>)
+                    
+        <span class="py-src-keyword">for</span> <span class="py-src-variable">ip</span> <span class="py-src-keyword">in</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_list</span>:
+            
+            <span class="py-src-variable">ap24_num</span> = <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g24_sta_num'</span>]/<span class="py-src-variable">len</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_sta_item</span>)
+            <span class="py-src-variable">ap5_num</span> = <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g5_sta_num'</span>]/<span class="py-src-variable">len</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_sta_item</span>)
+            
+            <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_mac'</span>] = <span class="py-src-variable">self</span>.<span class="py-src-variable">_login_heart_list</span>[<span class="py-src-variable">ip</span>][<span class="py-src-string">'ap_mac'</span>]
+            <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g24_sta_info'</span>]=[]
+            <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g5_sta_info'</span>]=[]
+            
+            <span class="py-src-keyword">for</span> <span class="py-src-variable">sta_mac</span> <span class="py-src-keyword">in</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_sta_item</span>:
+                <span class="py-src-variable">start_mac</span> = <span class="py-src-number">0x1</span>
+                <span class="py-src-keyword">for</span> <span class="py-src-variable">v</span> <span class="py-src-keyword">in</span> <span class="py-src-variable">range</span>(<span class="py-src-number">0</span>,<span class="py-src-variable">ap24_num</span>):       
+                    <span class="py-src-variable">stadata</span>=<span class="py-src-variable">copy</span>.<span class="py-src-variable">deepcopy</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info</span>)
+                    <span class="py-src-variable">stadata</span>[<span class="py-src-string">'sta_mac'</span>]=<span class="py-src-variable">sta_mac</span>[<span class="py-src-number">1</span>] + <span class="py-src-variable">self</span>.<span class="py-src-variable">_switchhex</span>(<span class="py-src-variable">start_mac</span>)
+                    <span class="py-src-variable">stadata</span>[<span class="py-src-string">'sta_rssi'</span>]  = <span class="py-src-variable">random</span>.<span class="py-src-variable">randint</span>(<span class="py-src-variable">rssi_start</span>, <span class="py-src-variable">rssi_end</span>)
+                    <span class="py-src-variable">stadata</span>[<span class="py-src-string">'sta_rx_rate'</span>]  = <span class="py-src-variable">int</span>(<span class="py-src-variable">random</span>.<span class="py-src-variable">choice</span>(<span class="py-src-variable">rx_rate_list</span>))
+                    <span class="py-src-variable">stadata</span>[<span class="py-src-string">'sta_rx_retry'</span>]  = <span class="py-src-variable">int</span>(<span class="py-src-variable">random</span>.<span class="py-src-variable">choice</span>(<span class="py-src-variable">rx_retry_list</span>))            
+                    <span class="py-src-variable">stadata</span>[<span class="py-src-string">'sta_tx_rate'</span>]  = <span class="py-src-variable">int</span>(<span class="py-src-variable">random</span>.<span class="py-src-variable">choice</span>(<span class="py-src-variable">tx_rate_list</span>))
+                    <span class="py-src-variable">stadata</span>[<span class="py-src-string">'sta_tx_retry'</span>]  = <span class="py-src-variable">int</span>(<span class="py-src-variable">random</span>.<span class="py-src-variable">choice</span>(<span class="py-src-variable">tx_retry_list</span>))
+                    <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g24_sta_info'</span>].<span class="py-src-variable">append</span>(<span class="py-src-variable">stadata</span>)
+                    <span class="py-src-variable">start_mac</span> = <span class="py-src-variable">start_mac</span> +<span class="py-src-number">1</span>
+                <span class="py-src-keyword">for</span> <span class="py-src-variable">v</span> <span class="py-src-keyword">in</span> <span class="py-src-variable">range</span>(<span class="py-src-number">0</span>,<span class="py-src-variable">ap5_num</span>):
+                    <span class="py-src-variable">stadata</span>=<span class="py-src-variable">copy</span>.<span class="py-src-variable">deepcopy</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_ap_sta_info_5g</span>)
+                    
+                    <span class="py-src-variable">stadata</span>[<span class="py-src-string">'sta_mac'</span>]=<span class="py-src-variable">sta_mac</span>[<span class="py-src-number">1</span>] + <span class="py-src-variable">self</span>.<span class="py-src-variable">_switchhex</span>(<span class="py-src-variable">start_mac</span>)
+                    
+                    <span class="py-src-variable">stadata</span>[<span class="py-src-string">'sta_rssi'</span>]  = <span class="py-src-variable">random</span>.<span class="py-src-variable">randint</span>(<span class="py-src-variable">rssi_start_5g</span>, <span class="py-src-variable">rssi_end_5g</span>)
+                    <span class="py-src-variable">stadata</span>[<span class="py-src-string">'sta_rx_rate'</span>]  = <span class="py-src-variable">int</span>(<span class="py-src-variable">random</span>.<span class="py-src-variable">choice</span>(<span class="py-src-variable">rx_rate_list_5g</span>))
+                    <span class="py-src-variable">stadata</span>[<span class="py-src-string">'sta_rx_retry'</span>]  = <span class="py-src-variable">int</span>(<span class="py-src-variable">random</span>.<span class="py-src-variable">choice</span>(<span class="py-src-variable">rx_retry_list_5g</span>))            
+                    <span class="py-src-variable">stadata</span>[<span class="py-src-string">'sta_tx_rate'</span>]  = <span class="py-src-variable">int</span>(<span class="py-src-variable">random</span>.<span class="py-src-variable">choice</span>(<span class="py-src-variable">tx_rate_list_5g</span>))
+                    <span class="py-src-variable">stadata</span>[<span class="py-src-string">'sta_tx_retry'</span>]  = <span class="py-src-variable">int</span>(<span class="py-src-variable">random</span>.<span class="py-src-variable">choice</span>(<span class="py-src-variable">tx_retry_list_5g</span>))
+                    <span class="py-src-variable">copydata</span>[<span class="py-src-string">'ap_g5_sta_info'</span>].<span class="py-src-variable">append</span>(<span class="py-src-variable">stadata</span>)
+                    <span class="py-src-variable">start_mac</span> = <span class="py-src-variable">start_mac</span> +<span class="py-src-number">1</span>
+            <span class="py-src-variable">self</span>.<span class="py-src-variable">_user_info_list</span>[<span class="py-src-variable">ip</span>] = <span class="py-src-variable">copydata</span>
+        
+ <span class="py-src-comment">#print copydata['ap_g5_sta_info']</span>
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_user_info_list</span>
+    
+<span class="py-src-keyword">class</span> <span class="py-src-identifier">AP</span>():
+    
+    <span class="py-src-variable">_login_heart_request</span> = {}
+    <span class="py-src-variable">_user_info_request</span>={}
+    <span class="py-src-variable">_token</span>=<span class="py-src-string">'netcore'</span>
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">__init__</span>(<span class="py-src-parameter">self</span>,<span class="py-src-parameter">server_ip</span>,<span class="py-src-parameter">client_ip</span>,<span class="py-src-parameter">login_heart_data</span>,<span class="py-src-parameter">use_data</span>):
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_server_ip</span>=<span class="py-src-variable">server_ip</span>
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_client_ip</span>=<span class="py-src-variable">client_ip</span>
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_login_heart_request</span> = <span class="py-src-variable">login_heart_data</span>
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_user_info_request</span> = <span class="py-src-variable">use_data</span>
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_s_addr</span> = (<span class="py-src-variable">server_ip</span>,<span class="py-src-number">20906</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">s</span> = <span class="py-src-variable">socket</span>.<span class="py-src-variable">socket</span>(<span class="py-src-variable">socket</span>.<span class="py-src-variable">AF_INET</span>,<span class="py-src-variable">socket</span>.<span class="py-src-variable">SOCK_DGRAM</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">s</span>.<span class="py-src-variable">setsockopt</span>(<span class="py-src-variable">socket</span>.<span class="py-src-variable">SOL_SOCKET</span>,<span class="py-src-variable">socket</span>.<span class="py-src-variable">SO_REUSEADDR</span>,<span class="py-src-number">1</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">s</span>.<span class="py-src-variable">setsockopt</span>(<span class="py-src-variable">socket</span>.<span class="py-src-variable">SOL_SOCKET</span>,<span class="py-src-variable">socket</span>.<span class="py-src-variable">SO_BROADCAST</span>,<span class="py-src-number">1</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">s</span>.<span class="py-src-variable">setblocking</span>(<span class="py-src-number">0</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">s</span>.<span class="py-src-variable">bind</span>((<span class="py-src-variable">client_ip</span>,<span class="py-src-number">6720</span>))
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">set_addr</span>(<span class="py-src-parameter">self</span>,<span class="py-src-parameter">server_ip</span>):
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_s_addr</span> = (<span class="py-src-variable">server_ip</span>,<span class="py-src-number">20906</span>)
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_s_addr</span>
+      
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">get_client_ip</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_client_ip</span>  
+           
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">_request</span>(<span class="py-src-parameter">self</span>,<span class="py-src-parameter">Token</span>,<span class="py-src-parameter">Token_len</span>,<span class="py-src-parameter">Packet_type</span>,<span class="py-src-parameter">Packet_length</span>,<span class="py-src-parameter">Data</span>):
+        <span class="py-src-variable">data</span> = <span class="py-src-variable">json</span>.<span class="py-src-variable">dumps</span>(<span class="py-src-variable">Data</span>,<span class="py-src-variable">sort_keys</span>=<span class="py-src-variable">True</span>)
+        <span class="py-src-keyword">if</span> <span class="py-src-variable">Token_len</span> == -<span class="py-src-number">1</span>:
+            <span class="py-src-variable">token_len</span>=<span class="py-src-number">8</span>
+        <span class="py-src-keyword">else</span>:
+            <span class="py-src-variable">token_len</span>=<span class="py-src-variable">Token_len</span>
+            
+        <span class="py-src-keyword">if</span> <span class="py-src-variable">Packet_length</span> == -<span class="py-src-number">1</span>:
+            <span class="py-src-variable">len_</span>=<span class="py-src-variable">len</span>(<span class="py-src-variable">data</span>)
+        <span class="py-src-keyword">else</span>:
+            <span class="py-src-variable">len_</span>=<span class="py-src-variable">Packet_length</span>
+
+        <span class="py-src-variable">buf</span>=<span class="py-src-variable">struct</span>.<span class="py-src-variable">pack</span>(<span class="py-src-string">'!'</span>+<span class="py-src-variable">str</span>(<span class="py-src-variable">token_len</span>)+<span class="py-src-string">'sii'</span>+<span class="py-src-variable">str</span>(<span class="py-src-variable">len</span>(<span class="py-src-variable">data</span>))+<span class="py-src-string">'s'</span>,<span class="py-src-variable">Token</span>,<span class="py-src-variable">Packet_type</span>,<span class="py-src-variable">len_</span>,<span class="py-src-variable">data</span>)
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">s</span>.<span class="py-src-variable">sendto</span>(<span class="py-src-variable">buf</span>,<span class="py-src-variable">self</span>.<span class="py-src-variable">_s_addr</span>)
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">request</span>(<span class="py-src-parameter">self</span>,<span class="py-src-parameter">status</span>,<span class="py-src-parameter">timeout</span>):
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_request</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_token</span>, -<span class="py-src-number">1</span>, <span class="py-src-variable">status</span>, -<span class="py-src-number">1</span>, <span class="py-src-variable">self</span>.<span class="py-src-variable">_login_heart_request</span>)
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_recv</span>(<span class="py-src-variable">timeout</span>,<span class="py-src-variable">status</span>)     
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">login_request</span>(<span class="py-src-parameter">self</span>,<span class="py-src-parameter">timeout</span>):
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_request</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_token</span>, -<span class="py-src-number">1</span>, <span class="py-src-variable">AP_LOGIN_REQUEST</span>, -<span class="py-src-number">1</span>, <span class="py-src-variable">self</span>.<span class="py-src-variable">_login_heart_request</span>)
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_recv</span>(<span class="py-src-variable">timeout</span>,<span class="py-src-variable">AP_LOGIN_REQUEST</span>)
+    
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">heart_request</span>(<span class="py-src-parameter">self</span>,<span class="py-src-parameter">timeout</span>):
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_request</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_token</span>, -<span class="py-src-number">1</span>, <span class="py-src-variable">AP_HEART_REQUEST</span>, -<span class="py-src-number">1</span>, <span class="py-src-variable">self</span>.<span class="py-src-variable">_login_heart_request</span>)
+        <span class="py-src-keyword">return</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_recv</span>(<span class="py-src-variable">timeout</span>,<span class="py-src-variable">AP_HEART_REQUEST</span>)
+        
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">user_request</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_request</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_token</span>, -<span class="py-src-number">1</span>, <span class="py-src-variable">AP_USE_INFO</span>, -<span class="py-src-number">1</span>, <span class="py-src-variable">self</span>.<span class="py-src-variable">_user_info_request</span>)
+        
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">_recv</span>(<span class="py-src-parameter">self</span>,<span class="py-src-parameter">inter</span>,<span class="py-src-parameter">status</span>):
+        <span class="py-src-variable">infds</span>,<span class="py-src-variable">outfds</span>,<span class="py-src-variable">errfds</span> = <span class="py-src-variable">select</span>.<span class="py-src-variable">select</span>([<span class="py-src-variable">self</span>.<span class="py-src-variable">s</span>],[],[],<span class="py-src-variable">inter</span>)
+        <span class="py-src-keyword">if</span> <span class="py-src-variable">len</span>(<span class="py-src-variable">infds</span>):
+            <span class="py-src-variable">r_data</span>, <span class="py-src-variable">addr</span> = <span class="py-src-variable">self</span>.<span class="py-src-variable">s</span>.<span class="py-src-variable">recvfrom</span>(<span class="py-src-number">2048</span>)
+            <span class="py-src-keyword">if</span> <span class="py-src-variable">len</span>(<span class="py-src-variable">r_data</span>):
+                <span class="py-src-variable">token</span>, <span class="py-src-variable">result_type</span>,<span class="py-src-variable">result_len</span>= <span class="py-src-variable">struct</span>.<span class="py-src-variable">unpack</span>(<span class="py-src-string">'!8sii'</span> ,<span class="py-src-variable">r_data</span>[<span class="py-src-number">0</span>:<span class="py-src-number">16</span>])
+                <span class="py-src-variable">result</span> = <span class="py-src-variable">struct</span>.<span class="py-src-variable">unpack</span>(<span class="py-src-string">'!'</span>+<span class="py-src-variable">str</span>(<span class="py-src-variable">result_len</span>)+<span class="py-src-string">'s'</span> ,<span class="py-src-variable">r_data</span>[<span class="py-src-number">16</span>:])
+                <span class="py-src-keyword">if</span> <span class="py-src-variable">len</span>(<span class="py-src-variable">result</span>):
+                    <span class="py-src-variable">self</span>.<span class="py-src-variable">set_addr</span>(<span class="py-src-variable">json</span>.<span class="py-src-variable">loads</span>(<span class="py-src-variable">result</span>[<span class="py-src-number">0</span>])[<span class="py-src-string">'ac_ip'</span>])
+                <span class="py-src-keyword">return</span> <span class="py-src-variable">result_type</span>
+        <span class="py-src-keyword">else</span>:
+            <span class="py-src-keyword">if</span> <span class="py-src-variable">status</span> == <span class="py-src-variable">AP_LOGIN_REQUEST</span>:
+                <span class="py-src-variable">status_s</span>=<span class="py-src-string">'login'</span>
+            <span class="py-src-keyword">elif</span> <span class="py-src-variable">status</span> == <span class="py-src-variable">AP_HEART_REQUEST</span>:
+                <span class="py-src-variable">status_s</span>=<span class="py-src-string">'heart'</span>
+            <span class="py-src-keyword">else</span>:
+                <span class="py-src-variable">status_s</span>=<span class="py-src-string">'error'</span>
+            <span class="py-src-keyword">print</span> <span class="py-src-variable">self</span>.<span class="py-src-variable">_client_ip</span>+ <span class="py-src-string">"  "</span>   + <span class="py-src-variable">status_s</span> +<span class="py-src-string">" timeout!!!"</span>
+            <span class="py-src-variable">logging</span>.<span class="py-src-variable">debug</span>(<span class="py-src-variable">self</span>.<span class="py-src-variable">_client_ip</span>+ <span class="py-src-string">"  "</span>   + <span class="py-src-variable">status_s</span> +<span class="py-src-string">" timeout!!!"</span>)
+            <span class="py-src-keyword">return</span> <span class="py-src-variable">False</span>
+            
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">close</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">s</span>.<span class="py-src-variable">close</span>()
+ 
+    
+<span class="py-src-keyword">def</span> <span class="py-src-identifier">mock_ap</span>(<span class="py-src-parameter">ap</span>):
+    
+    <span class="py-src-keyword">global</span> <span class="py-src-variable">is_exit</span>
+    <span class="py-src-variable">num</span> = <span class="py-src-number">0</span>
+    <span class="py-src-variable">overtime</span> = <span class="py-src-number">3</span>
+    <span class="py-src-variable">inter_time</span> = <span class="py-src-variable">mockconfig</span>.<span class="py-src-variable">getHeartTime</span>()
+    <span class="py-src-variable">status</span>=<span class="py-src-variable">AP_LOGIN_REQUEST</span>
+    <span class="py-src-keyword">while</span> <span class="py-src-keyword">not</span> <span class="py-src-variable">is_exit</span>:
+        <span class="py-src-variable">time</span>.<span class="py-src-variable">sleep</span>(<span class="py-src-number">1</span>)
+        <span class="py-src-variable">result</span>=<span class="py-src-variable">ap</span>.<span class="py-src-variable">request</span>(<span class="py-src-variable">status</span>, <span class="py-src-variable">mockconfig</span>.<span class="py-src-variable">getWaitTime</span>())
+        <span class="py-src-keyword">if</span> <span class="py-src-variable">result</span> !=<span class="py-src-variable">False</span>:
+            <span class="py-src-keyword">if</span> <span class="py-src-variable">hex</span>(<span class="py-src-variable">result</span>)== <span class="py-src-variable">hex</span>(<span class="py-src-variable">AP_LOGIN_REPLY</span>):
+                <span class="py-src-variable">status</span>=<span class="py-src-variable">AP_HEART_REQUEST</span>
+            <span class="py-src-keyword">elif</span> <span class="py-src-variable">hex</span>(<span class="py-src-variable">result</span>)==<span class="py-src-variable">hex</span>(<span class="py-src-variable">AP_HEART_REPLY</span>):
+                <span class="py-src-keyword">pass</span>
+            
+            <span class="py-src-variable">ap</span>.<span class="py-src-variable">user_request</span>()
+            <span class="py-src-variable">time</span>.<span class="py-src-variable">sleep</span>(<span class="py-src-variable">inter_time</span>)
+        <span class="py-src-keyword">else</span>:
+            <span class="py-src-variable">num</span>=<span class="py-src-variable">num</span>+<span class="py-src-number">1</span>
+            <span class="py-src-keyword">if</span> <span class="py-src-variable">num</span> &lt; <span class="py-src-variable">overtime</span>:
+                <span class="py-src-keyword">continue</span>
+            <span class="py-src-keyword">else</span>:
+                <span class="py-src-variable">num</span>=<span class="py-src-number">0</span>            
+            <span class="py-src-variable">ap</span>.<span class="py-src-variable">set_addr</span>(<span class="py-src-variable">mockconfig</span>.<span class="py-src-variable">getBroadcast</span>())
+            <span class="py-src-variable">status</span>=<span class="py-src-variable">AP_LOGIN_REQUEST</span>
+        
+    <span class="py-src-variable">mockconfig</span>.<span class="py-src-variable">DeleteIp</span>(<span class="py-src-variable">ap</span>.<span class="py-src-variable">get_client_ip</span>())
+    <span class="py-src-variable">time</span>.<span class="py-src-variable">sleep</span>(<span class="py-src-number">0.1</span>)
+    <span class="py-src-variable">ap</span>.<span class="py-src-variable">close</span>()
+    
+<span class="py-src-keyword">class</span> <span class="py-src-identifier">RequestHandler</span>(<span class="py-src-parameter">BaseHTTPServer</span>.<span class="py-src-parameter">BaseHTTPRequestHandler</span>):
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">_writeheaders</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-comment">#print self.path</span>
+        <span class="py-src-comment">#print self.headers</span>
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">send_response</span>(<span class="py-src-number">200</span>);
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">send_header</span>(<span class="py-src-string">'Content-type'</span>,<span class="py-src-string">'text/html'</span>);
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">end_headers</span>()
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">do_Head</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_writeheaders</span>()
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">do_GET</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_writeheaders</span>()
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">wfile</span>.<span class="py-src-variable">write</span>(<span class="py-src-variable">mockconfig</span>.<span class="py-src-variable">getCgiResponse</span>())
+    <span class="py-src-keyword">def</span> <span class="py-src-identifier">do_POST</span>(<span class="py-src-parameter">self</span>):
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">_writeheaders</span>()
+        <span class="py-src-variable">self</span>.<span class="py-src-variable">wfile</span>.<span class="py-src-variable">write</span>(<span class="py-src-variable">mockconfig</span>.<span class="py-src-variable">getCgiResponse</span>())
+
+
+<span class="py-src-keyword">def</span> <span class="py-src-identifier">start_web</span>(<span class="py-src-parameter">ip</span>):
+    <span class="py-src-variable">server_class</span>=<span class="py-src-variable">BaseHTTPServer</span>.<span class="py-src-variable">HTTPServer</span>
+    <span class="py-src-variable">handler_class</span>=<span class="py-src-variable">RequestHandler</span>
+    <span class="py-src-variable">server_address</span> = (<span class="py-src-variable">ip</span>, <span class="py-src-number">80</span>)
+    <span class="py-src-variable">httpd</span> = <span class="py-src-variable">server_class</span>(<span class="py-src-variable">server_address</span>, <span class="py-src-variable">handler_class</span>)
+    <span class="py-src-variable">httpd</span>.<span class="py-src-variable">allow_reuse_address</span>=<span class="py-src-variable">True</span>
+    <span class="py-src-variable">httpd</span>.<span class="py-src-variable">serve_forever</span>()
+     
+        
+<span class="py-src-keyword">if</span> <span class="py-src-variable">__name__</span> == <span class="py-src-string">"__main__"</span> :
+    
+    <span class="py-src-variable">logging</span>.<span class="py-src-variable">basicConfig</span>(<span class="py-src-variable">level</span>=<span class="py-src-variable">logging</span>.<span class="py-src-variable">DEBUG</span>,
+                <span class="py-src-variable">format</span>=<span class="py-src-string">'%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s'</span>,
+                <span class="py-src-variable">datefmt</span>=<span class="py-src-string">'%a, %d %b %Y %H:%M:%S'</span>,
+                <span class="py-src-variable">filename</span>=<span class="py-src-string">'run.log'</span>,
+                <span class="py-src-variable">filemode</span>=<span class="py-src-string">'w'</span>)
+    
+    
+    <span class="py-src-variable">mockconfig</span>=<span class="py-src-variable">ConfigSystem</span>(<span class="py-src-string">'config.txt'</span>)
+    
+    <span class="py-src-variable">signal</span>.<span class="py-src-variable">signal</span>(<span class="py-src-variable">signal</span>.<span class="py-src-variable">SIGINT</span>, <span class="py-src-variable">signal_init</span>)
+    <span class="py-src-variable">signal</span>.<span class="py-src-variable">signal</span>(<span class="py-src-variable">signal</span>.<span class="py-src-variable">SIGTERM</span>,  <span class="py-src-variable">signal_init</span>)
+    
+    <span class="py-src-variable">mockconfig</span>.<span class="py-src-variable">ConfigIp</span>()
+    
+    <span class="py-src-keyword">for</span> <span class="py-src-variable">ip</span> <span class="py-src-keyword">in</span> <span class="py-src-variable">mockconfig</span>.<span class="py-src-variable">getIpList</span>(): 
+               
+        <span class="py-src-variable">ap</span>=<span class="py-src-variable">AP</span>(<span class="py-src-variable">mockconfig</span>.<span class="py-src-variable">getBroadcast</span>(),<span class="py-src-variable">ip</span>,<span class="py-src-variable">mockconfig</span>.<span class="py-src-variable">GetloginHeartList</span>()[<span class="py-src-variable">ip</span>],<span class="py-src-variable">mockconfig</span>.<span class="py-src-variable">GetUserInfoList</span>()[<span class="py-src-variable">ip</span>])
+        <span class="py-src-keyword">try</span>:
+            <span class="py-src-comment">#print ap</span>
+            <span class="py-src-variable">action_thread</span> = <span class="py-src-variable">threading</span>.<span class="py-src-variable">Thread</span>(<span class="py-src-variable">target</span>=<span class="py-src-variable">mock_ap</span>,<span class="py-src-variable">args</span>=(<span class="py-src-variable">ap</span>,))
+            <span class="py-src-variable">action_thread</span>.<span class="py-src-variable">setDaemon</span>(<span class="py-src-variable">True</span>)
+            <span class="py-src-variable">action_thread</span>.<span class="py-src-variable">start</span>()
+            <span class="py-src-variable">Theads</span>.<span class="py-src-variable">append</span>(<span class="py-src-variable">action_thread</span>)
+        <span class="py-src-keyword">except</span> (<span class="py-src-variable">KeyboardInterrupt</span>,<span class="py-src-variable">SystemExit</span>):
+                <span class="py-src-keyword">raise</span>
+        <span class="py-src-keyword">except</span>:
+                <span class="py-src-variable">traceback</span>.<span class="py-src-variable">print_exc</span>()
+        
+        <span class="py-src-variable">p</span> = <span class="py-src-variable">multiprocessing</span>.<span class="py-src-variable">Process</span>(<span class="py-src-variable">target</span>=<span class="py-src-variable">start_web</span>, <span class="py-src-variable">args</span>=(<span class="py-src-variable">ip</span>,)) 
+        <span class="py-src-variable">p</span>.<span class="py-src-variable">start</span>()
+        <span class="py-src-variable">web_list</span>.<span class="py-src-variable">append</span>(<span class="py-src-variable">p</span>)
+    
+    <span class="py-src-keyword">print</span> <span class="py-src-string">"虚拟AP已经启动, AC地址务必在广播网段的50以内，Cril + C 停止运行"</span>
+    <span class="py-src-keyword">while</span> <span class="py-src-variable">True</span>:
+        <span class="py-src-variable">alive</span> = <span class="py-src-variable">False</span>
+        <span class="py-src-keyword">for</span> <span class="py-src-variable">T</span> <span class="py-src-keyword">in</span> <span class="py-src-variable">Theads</span>:
+            <span class="py-src-variable">alive</span> = <span class="py-src-variable">alive</span> <span class="py-src-keyword">or</span> <span class="py-src-variable">T</span>.<span class="py-src-variable">isAlive</span>()
+        <span class="py-src-keyword">if</span> <span class="py-src-keyword">not</span> <span class="py-src-variable">alive</span>:
+            <span class="py-src-keyword">break</span>
+    <span class="py-src-variable">os</span>.<span class="py-src-variable">system</span>(<span class="py-src-string">'killall -9 /usr/bin/python'</span>)
+    
+    
+
+        
+    
+</pre>
+</body>
